@@ -1,0 +1,14 @@
+version: '3.4'
+ 
+services:
+
+  database:
+    image: postgres:13.0-alpine
+    environment:
+      POSTGRES_DB: question
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    ports: 
+      - "5432:5432"
+    volumes:
+        - "./schema.sql:/docker-entrypoint-initdb.d/database-latest.sql:ro"
