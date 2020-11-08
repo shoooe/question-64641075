@@ -1,79 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace Question
 {
-    public class User
-    {
-        public int Id { get; set; }
-        public string FullName { get; set; } = null!;
-        public virtual IEnumerable<Post> Posts { get; set; } 
-            = new HashSet<Post>();
-    }
-
-    public class Post
-    {
-        public int Id { get; set; }
-        public int AuthorId { get; set; }
-        public string Title { get; set; } = null!;
-        public string Body { get; set; } = null!;
-        public int Score { get; set; }
-
-        public virtual User User { get; set; } = null!;
-    }
-
-    public class QuestionContext : DbContext
-    {
-        public DbSet<User> Users { get; set; } = null!;
-        public DbSet<Post> Posts { get; set; } = null!;
-
-        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-        {
-            optionsBuilder.UseNpgsql("Host=localhost;Database=question;Username=app;Password=app")
-                .LogTo(Console.WriteLine, LogLevel.Information);
-        }
-
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
-        {
-            modelBuilder.Entity<User>().ToTable("users");
-            modelBuilder.Entity<User>().Property(x => x.Id).HasColumnName("id");
-            modelBuilder.Entity<User>().Property(x => x.FullName).HasColumnName("full_name");
-            modelBuilder.Entity<User>().HasMany(x => x.Posts).WithOne(x => x.User)
-                .HasForeignKey(x => x.AuthorId);
-
-            modelBuilder.Entity<Post>().ToTable("posts");
-            modelBuilder.Entity<Post>().Property(x => x.Id).HasColumnName("id");
-            modelBuilder.Entity<Post>().Property(x => x.Title).HasColumnName("title");
-            modelBuilder.Entity<Post>().Property(x => x.Body).HasColumnName("body");
-            modelBuilder.Entity<Post>().Property(x => x.Score).HasColumnName("score");
-            modelBuilder.Entity<Post>().Property(x => x.AuthorId).HasColumnName("author_id");
-        }
-    }
-
-    enum PostOrder
-    {
-        TitleAsc,
-        TitleDesc,
-        ScoreAsc,
-        ScoreDesc,
-    }
-
-    static class IQueryableExtensions
-    {
-        public static IOrderedQueryable<Post> OrderByCommon(this IQueryable<Post> queryable, PostOrder orderBy)
-            => orderBy switch
-            {
-                PostOrder.TitleAsc => queryable.OrderBy(x => x.Title),
-                PostOrder.TitleDesc => queryable.OrderByDescending(x => x.Title),
-                PostOrder.ScoreAsc => queryable.OrderBy(x => x.Score).ThenBy(x => x.Title),
-                PostOrder.ScoreDesc => queryable.OrderByDescending(x => x.Score).ThenBy(x => x.Title),
-                _ => throw new NotSupportedException(),
-            };
-    }
-
     class Program
     {
         static void WorkingExample()
@@ -124,10 +53,139 @@ namespace Question
             }
         }
 
+        static void OrderByAllNonWorkingExample()
+        {
+            var input = PostOrder.ScoreDesc;
+            var sorting = input switch
+            {
+                PostOrder.ScoreAsc => new[]
+                {
+                    new Sorting<Post>(x => x.Score, SortingDirection.Asc),
+                    new Sorting<Post>(x => x.Title, SortingDirection.Asc)
+                },
+                PostOrder.ScoreDesc => new[]
+                {
+                    new Sorting<Post>(x => x.Score, SortingDirection.Desc),
+                    new Sorting<Post>(x => x.Title, SortingDirection.Asc)
+                },
+                PostOrder.TitleAsc => new[]
+                {
+                    new Sorting<Post>(x => x.Title, SortingDirection.Asc)
+                },
+                PostOrder.TitleDesc => new[]
+                {
+                    new Sorting<Post>(x => x.Title, SortingDirection.Desc)
+                },
+                _ => throw new NotSupportedException(),
+            };
+            var dbContext = new QuestionContext();
+            var users = dbContext.Users
+                .Select(x => new
+                {
+                    User = x,
+                    Top3Posts = x.Posts.AsQueryable()
+                        .OrderByAll(sorting)
+                        .Take(3)
+                        .ToList()
+                }).ToList();
+            foreach (var user in users)
+            {
+                Console.WriteLine($"User {user.User.FullName}");
+                Console.WriteLine($"Best posts:");
+                foreach (var post in user.Top3Posts)
+                {
+                    Console.WriteLine($"Post {post.Title} with score {post.Score}");
+                }
+            }
+        }
+
+        static void AlternativeExample1()
+        {
+            var input = PostOrder.ScoreDesc;
+            var dbContext = new QuestionContext();
+            var query = dbContext.Posts
+                .OrderByCommon(input);
+            var users = dbContext.Users
+                .Select(x => new
+                {
+                    Key = x.Id,
+                    List = query.Where(y => y.AuthorId == x.Id)
+                        .Take(3)
+                        .ToList()
+                })
+                .ToList();
+            foreach (var user in users)
+            {
+                Console.WriteLine($"User {user.Key}");
+                Console.WriteLine($"Best posts:");
+                foreach (var post in user.List)
+                {
+                    Console.WriteLine($"Post {post.Title} with score {post.Score}");
+                }
+            }
+        }
+
+        static void AlternativeExample2()
+        {
+            var input = PostOrder.ScoreDesc;
+            var dbContext = new QuestionContext();
+            var query = dbContext.Posts
+                .OrderByCommon(input);
+            var users = query
+                .Select(x => x.AuthorId)
+                .Distinct()
+                // .Select(x => new { Key = x })
+                // .ToList();
+                .Select(x => new
+                {
+                    Key = x,
+                    List = query.Where(y => y.AuthorId == x)
+                        .Take(3)
+                        .ToList()
+                })
+                .ToList();
+        }
+
+        static void AlternativeExample3()
+        {
+            var input = PostOrder.ScoreDesc;
+            var dbContext = new QuestionContext();
+            var sub = dbContext.Posts
+                .OrderByCommon(input);
+            var posts = sub
+                .Select(a => a.AuthorId)
+                .Distinct()
+                .SelectMany(a => sub.Where(b => b.AuthorId == a).Take(3), (a, b) => b)
+                .ToList();
+            foreach (var post in posts)
+            {
+                Console.WriteLine($"Author {post.AuthorId} Post {post.Title} with score {post.Score}");
+            }
+        }
+
+        static void FinalExample()
+        {
+            var input = PostOrder.ScoreDesc;
+            var dbContext = new QuestionContext();
+            var users = dbContext.Posts
+                .PartitionBy(x => x.AuthorId, x => x.OrderByCommon(input), take: 3, skip: 0)
+                .ToLookup(x => x.AuthorId);
+            foreach (var user in users)
+            {
+                Console.WriteLine($"Author {user.Key}");
+                foreach (var post in user) 
+                    Console.WriteLine($"Post {post.Title} with score {post.Score}");
+            }
+        }
+
         static void Main(string[] args)
         {
             // WorkingExample();
-            NonWorkingExample();
+            // NonWorkingExample();
+            // AlternativeExample1();
+            // AlternativeExample2();
+            // AlternativeExample3();
+            FinalExample();
         }
     }
 }
