@@ -53,52 +53,6 @@ namespace Question
             }
         }
 
-        static void OrderByAllNonWorkingExample()
-        {
-            var input = PostOrder.ScoreDesc;
-            var sorting = input switch
-            {
-                PostOrder.ScoreAsc => new[]
-                {
-                    new Sorting<Post>(x => x.Score, SortingDirection.Asc),
-                    new Sorting<Post>(x => x.Title, SortingDirection.Asc)
-                },
-                PostOrder.ScoreDesc => new[]
-                {
-                    new Sorting<Post>(x => x.Score, SortingDirection.Desc),
-                    new Sorting<Post>(x => x.Title, SortingDirection.Asc)
-                },
-                PostOrder.TitleAsc => new[]
-                {
-                    new Sorting<Post>(x => x.Title, SortingDirection.Asc)
-                },
-                PostOrder.TitleDesc => new[]
-                {
-                    new Sorting<Post>(x => x.Title, SortingDirection.Desc)
-                },
-                _ => throw new NotSupportedException(),
-            };
-            var dbContext = new QuestionContext();
-            var users = dbContext.Users
-                .Select(x => new
-                {
-                    User = x,
-                    Top3Posts = x.Posts.AsQueryable()
-                        .OrderByAll(sorting)
-                        .Take(3)
-                        .ToList()
-                }).ToList();
-            foreach (var user in users)
-            {
-                Console.WriteLine($"User {user.User.FullName}");
-                Console.WriteLine($"Best posts:");
-                foreach (var post in user.Top3Posts)
-                {
-                    Console.WriteLine($"Post {post.Title} with score {post.Score}");
-                }
-            }
-        }
-
         static void AlternativeExample1()
         {
             var input = PostOrder.ScoreDesc;
@@ -168,7 +122,10 @@ namespace Question
             var input = PostOrder.ScoreDesc;
             var dbContext = new QuestionContext();
             var users = dbContext.Posts
-                .PartitionBy(x => x.AuthorId, x => x.OrderByCommon(input), take: 3, skip: 0)
+                .PartitionBy(
+                    groupBy: x => x.AuthorId, 
+                    orderBy: x => x.OrderByCommon(input),
+                    limitBy: query => query.Skip(0).Take(3))
                 .ToLookup(x => x.AuthorId);
             foreach (var user in users)
             {

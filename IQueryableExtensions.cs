@@ -7,33 +7,6 @@ namespace Question
 {
     public static class IQueryableExtensions
     {
-        public static IOrderedQueryable<T> OrderByAll<T>(this IQueryable<T> queryable, IEnumerable<Sorting<T>> sortings)
-        {
-            if (!sortings.Any())
-                throw new NotSupportedException();
-
-            var sorting = sortings.First();
-            IOrderedQueryable<T> orderedQueryable = sorting.Direction switch
-            {
-                SortingDirection.Asc => queryable.OrderBy(sorting.Field),
-                SortingDirection.Desc => queryable.OrderByDescending(sorting.Field),
-                _ => throw new NotSupportedException(),
-            };
-            sortings = sortings.Skip(1);
-            while (sortings.Any())
-            {
-                var nextSorting = sortings.First();
-                orderedQueryable = sorting.Direction switch
-                {
-                    SortingDirection.Asc => orderedQueryable.ThenBy(nextSorting.Field),
-                    SortingDirection.Desc => orderedQueryable.ThenByDescending(nextSorting.Field),
-                    _ => throw new NotSupportedException(),
-                };
-                sortings = sortings.Skip(1);
-            }
-            return orderedQueryable;
-        }
-
         public static IOrderedQueryable<Post> OrderByCommon(this IQueryable<Post> queryable, PostOrder orderBy)
             => orderBy switch
             {
@@ -59,7 +32,7 @@ namespace Question
                 Expression.Invoke(fieldSelector, new Expression[] { x }),
                 key
             );
-            // queryable.Where(x => fieldSelector(x) == key)
+            // orderBy(queryable).Where(x => fieldSelector(x) == key)
             MethodCallExpression whereCallExpression = Expression.Call(  
                 typeof(Queryable),  
                 nameof(Queryable.Where),  
@@ -69,7 +42,7 @@ namespace Question
                     predicateBody, 
                     new ParameterExpression[] { x })
             );
-            // queryable.Where(x => fieldSelector(x) == key).Skip(skip)
+            // orderBy(queryable).Where(x => fieldSelector(x) == key).Skip(skip)
             MethodCallExpression skipCallExpression = Expression.Call(  
                 typeof(Queryable),  
                 nameof(Queryable.Skip),  
@@ -77,7 +50,7 @@ namespace Question
                 whereCallExpression,  
                 Expression.Constant(skip)
             );
-            // queryable.Where(x => fieldSelector(x) == key).Skip(skip).Take(take)
+            // orderBy(queryable).Where(x => fieldSelector(x) == key).Skip(skip).Take(take)
             MethodCallExpression takeCallExpression = Expression.Call(  
                 typeof(Queryable),  
                 nameof(Queryable.Take),  
@@ -85,13 +58,50 @@ namespace Question
                 skipCallExpression,  
                 Expression.Constant(take)
             );
-            // key => queryable.Where(x => fieldSelector(x) == key).Skip(skip).Take(take)
+            // key => orderBy(queryable).Where(x => fieldSelector(x) == key).Skip(skip).Take(take)
             var selectManyExpr = Expression.Lambda<Func<TKey, IEnumerable<TModel>>>(
                 takeCallExpression,
                 new ParameterExpression[] { key });
 
             var filteredQueryable = queryable
                 .Select(fieldSelector)
+                .Distinct()
+                .SelectMany<TKey, TModel, TModel>(selectManyExpr, (a, b) => b);
+            return orderBy(filteredQueryable);
+        }
+
+        public static IOrderedQueryable<TModel> PartitionBy<TModel, TKey>(
+            this IQueryable<TModel> queryable, 
+            Expression<Func<TModel, TKey>> groupBy, 
+            Func<IQueryable<TModel>, IOrderedQueryable<TModel>> orderBy,
+            Expression<Func<IQueryable<TModel>, IQueryable<TModel>>> limitBy)
+        {
+            // key
+            ParameterExpression key = Expression.Parameter(typeof(TKey), "key");
+            // x
+            ParameterExpression x = Expression.Parameter(typeof(TModel), "x");
+            // groupBy(x) == key
+            Expression predicateBody = Expression.Equal(
+                Expression.Invoke(groupBy, new Expression[] { x }),
+                key
+            );
+            // orderBy(queryable).Where(x => groupBy(x) == key)
+            MethodCallExpression whereCallExpression = Expression.Call(  
+                typeof(Queryable),  
+                nameof(Queryable.Where),  
+                new Type[] { typeof(TModel) },  
+                orderBy(queryable).Expression,  
+                Expression.Lambda<Func<TModel, bool>>(
+                    predicateBody, 
+                    new ParameterExpression[] { x })
+            );
+            // key => orderBy(queryable).Where(x => groupBy(x) == key).Skip(skip).Take(take)
+            var selectManyExpr = Expression.Lambda<Func<TKey, IEnumerable<TModel>>>(
+                Expression.Invoke(limitBy, new Expression[] { whereCallExpression }),
+                new ParameterExpression[] { key });
+
+            var filteredQueryable = queryable
+                .Select(groupBy)
                 .Distinct()
                 .SelectMany<TKey, TModel, TModel>(selectManyExpr, (a, b) => b);
             return orderBy(filteredQueryable);

@@ -1,6 +1,5 @@
 using System;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.Logging;
 
 namespace Question
@@ -14,8 +13,6 @@ namespace Question
         {
             optionsBuilder.UseNpgsql("Host=localhost;Database=question;Username=app;Password=app")
                 .LogTo(Console.WriteLine, LogLevel.Information);
-            // optionsBuilder.UseOrderByAll();
-            // optionsBuilder.ReplaceService<IQueryTranslationPreprocessorFactory, CustomQueryTranslationPreprocessorFactory>();
         }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
